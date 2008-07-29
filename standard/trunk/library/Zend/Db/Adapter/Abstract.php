@@ -77,6 +77,13 @@ abstract class Zend_Db_Adapter_Abstract
     protected $_profiler;
 
     /**
+     * Default class name for a DB statement.
+     *
+     * @var string
+     */
+    protected $_defaultStmtClass = 'Zend_Db_Statement';
+
+    /**
      * Default class name for the profiler object.
      *
      * @var string
@@ -188,9 +195,11 @@ abstract class Zend_Db_Adapter_Abstract
             }
         }
         if (array_key_exists('driver_options', $config)) {
-            // can't use array_merge() because keys might be integers
-            foreach ((array) $config['driver_options'] as $key => $value) {
-                $driverOptions[$key] = $value;
+            if (!empty($config['driver_options'])) {
+                // can't use array_merge() because keys might be integers
+                foreach ((array) $config['driver_options'] as $key => $value) {
+                    $driverOptions[$key] = $value;
+                }
             }
         }
         $this->_config  = array_merge($this->_config, $config);
@@ -376,6 +385,27 @@ abstract class Zend_Db_Adapter_Abstract
     }
 
     /**
+     * Get the default statement class.
+     *
+     * @return string
+     */
+    public function getStatementClass()
+    {
+        return $this->_defaultStmtClass;
+    }
+
+    /**
+     * Set the default statement class.
+     *
+     * @return Zend_Db_Abstract Fluent interface
+     */
+    public function setStatementClass($class)
+    {
+        $this->_defaultStmtClass = $class;
+        return $this;
+    }
+
+    /**
      * Prepares and executes an SQL statement with bound data.
      *
      * @param  mixed  $sql  The SQL statement with placeholders.
@@ -390,7 +420,7 @@ abstract class Zend_Db_Adapter_Abstract
 
         // is the $sql a Zend_Db_Select object?
         if ($sql instanceof Zend_Db_Select) {
-            $sql = $sql->__toString();
+            $sql = $sql->assemble();
         }
 
         // make sure $bind to an array;
@@ -634,7 +664,6 @@ abstract class Zend_Db_Adapter_Abstract
         }
         $stmt = $this->query($sql, $bind);
         $result = $stmt->fetch($fetchMode);
-        $stmt->closeCursor();
         return $result;
     }
 
@@ -709,7 +738,6 @@ abstract class Zend_Db_Adapter_Abstract
     {
         $stmt = $this->query($sql, $bind);
         $result = $stmt->fetchColumn(0);
-        $stmt->closeCursor();
         return $result;
     }
 
@@ -721,8 +749,10 @@ abstract class Zend_Db_Adapter_Abstract
      */
     protected function _quote($value)
     {
-        if (is_int($value) || is_float($value)) {
+        if (is_int($value)) {
             return $value;
+        } elseif (is_float($value)) {
+            return sprintf('%F', $value);
         }
         return "'" . addcslashes($value, "\000\n\r\\'\"\032") . "'";
     }
@@ -742,7 +772,7 @@ abstract class Zend_Db_Adapter_Abstract
         $this->_connect();
 
         if ($value instanceof Zend_Db_Select) {
-            return '(' . $value->__toString() . ')';
+            return '(' . $value->assemble() . ')';
         }
 
         if ($value instanceof Zend_Db_Expr) {
@@ -757,9 +787,10 @@ abstract class Zend_Db_Adapter_Abstract
         }
 
         if ($type !== null && array_key_exists($type = strtoupper($type), $this->_numericDataTypes)) {
+            $quotedValue = '0';
             switch ($this->_numericDataTypes[$type]) {
                 case Zend_Db::INT_TYPE: // 32-bit integer
-                    return (string) intval($value);
+                    $quotedValue = (string) intval($value);
                     break;
                 case Zend_Db::BIGINT_TYPE: // 64-bit integer
                     // ANSI SQL-style hex literals (e.g. x'[\dA-F]+')
@@ -774,14 +805,13 @@ abstract class Zend_Db_Adapter_Abstract
                           )
                         )/x',
                         (string) $value, $matches)) {
-                        return $matches[1];
+                        $quotedValue = $matches[1];
                     }
                     break;
                 case Zend_Db::FLOAT_TYPE: // float or decimal
-                    return (string) floatval($value);
-                    break;
+                    $quotedValue = sprintf('%F', $value);
             }
-            return '0';
+            return $quotedValue;
         }
 
         return $this->_quote($value);
@@ -869,7 +899,7 @@ abstract class Zend_Db_Adapter_Abstract
      * @param boolean $auto If true, heed the AUTO_QUOTE_IDENTIFIERS config option.
      * @return string The quoted identifier and alias.
      */
-    public function quoteTableAs($ident, $alias = null, $auto=false)
+    public function quoteTableAs($ident, $alias = null, $auto = false)
     {
         return $this->_quoteIdentifierAs($ident, $alias, $auto);
     }
@@ -888,7 +918,7 @@ abstract class Zend_Db_Adapter_Abstract
         if ($ident instanceof Zend_Db_Expr) {
             $quoted = $ident->__toString();
         } elseif ($ident instanceof Zend_Db_Select) {
-            $quoted = '(' . $ident->__toString() . ')';
+            $quoted = '(' . $ident->assemble() . ')';
         } else {
             if (is_string($ident)) {
                 $ident = explode('.', $ident);
@@ -984,13 +1014,16 @@ abstract class Zend_Db_Adapter_Abstract
     {
         switch ($this->_caseFolding) {
             case Zend_Db::CASE_LOWER:
-                return strtolower((string) $key);
+                $value = strtolower((string) $key);
+                break;
             case Zend_Db::CASE_UPPER:
-                return strtoupper((string) $key);
+                $value = strtoupper((string) $key);
+                break;
             case Zend_Db::CASE_NATURAL:
             default:
-                return (string) $key;
+                $value = (string) $key;
         }
+        return $value;
     }
 
     /**

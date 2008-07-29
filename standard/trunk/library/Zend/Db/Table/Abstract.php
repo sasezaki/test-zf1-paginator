@@ -70,6 +70,10 @@ abstract class Zend_Db_Table_Abstract
     const RESTRICT         = 'restrict';
     const SET_NULL         = 'setNull';
 
+    const DEFAULT_NONE     = 'defaultNone';
+    const DEFAULT_CLASS    = 'defaultClass';
+    const DEFAULT_DB       = 'defaultDb';
+    
     /**
      * Default Zend_Db_Adapter_Abstract object.
      *
@@ -200,6 +204,10 @@ abstract class Zend_Db_Table_Abstract
      */
     protected $_dependentTables = array();
 
+    
+    protected $_defaultSource = self::DEFAULT_NONE;
+    protected $_defaultValues = array();
+    
     /**
      * Constructor.
      *
@@ -367,6 +375,54 @@ abstract class Zend_Db_Table_Abstract
         return $this->_dependentTables;
     }
 
+    /**
+     * set the defaultSource property - this tells the table class where to find default values
+     *
+     * @param string $defaultSource
+     * @return Zend_Db_Table_Abstract
+     */
+    public function setDefaultSource($defaultSource = self::DEFAULT_NONE)
+    {
+        if (!in_array($defaultSource, array(self::DEFAULT_CLASS, self::DEFAULT_DB, self::DEFAULT_NONE))) {
+            $defaultSource = self::DEFAULT_NONE;
+        }
+        
+        $this->_defaultSource = $defaultSource;
+        return $this;
+    }
+    
+    /**
+     * returns the default source flag that determines where defaultSources come from
+     *
+     * @return unknown
+     */
+    public function getDefaultSource()
+    {
+        return $this->_defaultSource;
+    }
+    
+    /**
+     * set the default values for the table class
+     *
+     * @param array $defaultValues
+     * @return Zend_Db_Table_Abstract
+     */
+    public function setDefaultValues(Array $defaultValues)
+    {
+        foreach ($defaultValues as $defaultName => $defaultValue) {
+            if (array_key_exists($defaultName, $this->_metadata)) {
+                $this->_defaultValues[$defaultName] = $defaultValue;
+            }
+        }
+        return $this;
+    }
+    
+    public function getDefaultValues()
+    {
+        return $this->_defaultValues;
+    }
+    
+    
     /**
      * Sets the default Zend_Db_Adapter_Abstract for all Zend_Db_Table objects.
      *
@@ -981,6 +1037,9 @@ abstract class Zend_Db_Table_Abstract
                 throw new Zend_Db_Table_Exception("Missing value(s) for the primary key");
             }
             for ($i = 0; $i < count($keyValues); ++$i) {
+                if (!isset($whereList[$i])) {
+                    $whereList[$i] = array();
+                }
                 $whereList[$i][$keyPosition] = $keyValues[$i];
             }
         }
@@ -992,8 +1051,10 @@ abstract class Zend_Db_Table_Abstract
                 $whereAndTerms = array();
                 foreach ($keyValueSets as $keyPosition => $keyValue) {
                     $type = $this->_metadata[$keyNames[$keyPosition]]['DATA_TYPE'];
+                    $tableName = $this->_db->quoteTableAs($this->_name);
+                    $columnName = $this->_db->quoteIdentifier($keyNames[$keyPosition], true);
                     $whereAndTerms[] = $this->_db->quoteInto(
-                        $this->_db->quoteIdentifier($keyNames[$keyPosition], true) . ' = ?',
+                        $tableName . '.' . $columnName . ' = ?',
                         $keyValue, $type);
                 }
                 $whereOrTerms[] = '(' . implode(' AND ', $whereAndTerms) . ')';
@@ -1110,11 +1171,38 @@ abstract class Zend_Db_Table_Abstract
      * Fetches a new blank row (not from the database).
      *
      * @param  array $data OPTIONAL data to populate in the new row.
+     * @param  string $defaultSource OPTIONAL flag to force default values into new row
      * @return Zend_Db_Table_Row_Abstract
      */
-    public function createRow(array $data = array())
+    public function createRow(array $data = array(), $defaultSource = null)
     {
         $defaults = array_combine($this->_cols, array_fill(0, count($this->_cols), null));
+        
+        // nothing provided at call-time, take the class value
+        if ($defaultSource == null) {
+            $defaultSource = $this->_defaultSource;
+        }
+        
+        if (!in_array($defaultSource, array(self::DEFAULT_CLASS, self::DEFAULT_DB, self::DEFAULT_NONE))) {
+            $defaultSource = self::DEFAULT_NONE;
+        }
+        
+        if ($defaultSource == self::DEFAULT_DB) {
+            foreach ($this->_metadata as $metadataName => $metadata) {
+                if (($metadata['DEFAULT'] != null) && 
+                    ($metadata['NULLABLE'] !== true || ($metadata['NULLABLE'] === true && isset($this->_defaultValues[$metadataName]) && $this->_defaultValues[$metadataName] === true)) && 
+                    (!(isset($this->_defaultValues[$metadataName]) && $this->_defaultValues[$metadataName] === false))) {
+                    $defaults[$metadataName] = $metadata['DEFAULT']; 
+                }
+            }
+        } elseif ($defaultSource == self::DEFAULT_CLASS && $this->_defaultValues) {
+            foreach ($this->_defaultValues as $defaultName => $defaultValue) {
+                if (array_key_exists($defaultName, $defaults)) {
+                    $defaults[$defaultName] = $defaultValue;
+                }
+            }
+        }
+        
         $data = array_intersect_key($data, $defaults);
         $config = array(
             'table'    => $this,

@@ -124,7 +124,9 @@ class Zend_Db_Statement_Mysqli extends Zend_Db_Statement
     public function closeCursor()
     {
         if ($stmt = $this->_stmt) {
-        $this->_stmt->free_result();
+            $mysqli = $this->_adapter->getConnection();
+            while ($mysqli->next_result()) {}
+            $this->_stmt->free_result();
             return $this->_stmt->reset();
         }
         return false;

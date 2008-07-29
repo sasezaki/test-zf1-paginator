@@ -40,7 +40,7 @@ abstract class Zend_Cache
      *
      * @var array
      */
-    public static $standardBackends = array('File', 'Sqlite', 'Memcached', 'Apc', 'ZendPlatform');
+    public static $standardBackends = array('File', 'Sqlite', 'Memcached', 'Apc', 'ZendPlatform', 'Xcache');
 
     /**
      * Only for backward compatibily (may be removed in next major release)
@@ -56,7 +56,7 @@ abstract class Zend_Cache
      * @var array
      * @deprecated
      */
-    public static $availableBackends = array('File', 'Sqlite', 'Memcached', 'Apc', 'ZendPlatform');
+    public static $availableBackends = array('File', 'Sqlite', 'Memcached', 'Apc', 'ZendPlatform', 'Xcache');
 
     /**
      * Consts for clean() method
@@ -77,14 +77,18 @@ abstract class Zend_Cache
      * @param boolean $customBackendNaming if true, the backend argument is used as a complete class name ; if false, the backend argument is used as the end of "Zend_Cache_Backend_[...]" class name
      * @param boolean $autoload if true, there will no require_once for backend and frontend (usefull only for custom backends/frontends)
      * @throws Zend_Cache_Exception
-     * @return Zend_Cache_Frontend
+     * @return Zend_Cache_Core|Zend_Cache_Frontend
      */
     public static function factory($frontend, $backend, $frontendOptions = array(), $backendOptions = array(), $customFrontendNaming = false, $customBackendNaming = false, $autoload = false)
     {
 
         // because lowercase will fail
-        $frontend = self::_normalizeName($frontend);
-        $backend  = self::_normalizeName($backend);
+        if (!$customFrontendNaming) {
+            $frontend = self::_normalizeName($frontend);
+        }
+        if (!$customBackendNaming) {
+            $backend  = self::_normalizeName($backend);
+        }
 
         // working on the frontend
         if (in_array($frontend, self::$standardFrontends)) {

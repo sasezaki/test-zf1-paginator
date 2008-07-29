@@ -79,12 +79,20 @@ class Zend_Controller_Router_Rewrite extends Zend_Controller_Router_Abstract
 
     /**
      * Add route to the route chain
+     * 
+     * If route implements Zend_Controller_Request_Aware interface it is initialized with a request object
      *
      * @param string $name Name of the route
      * @param Zend_Controller_Router_Route_Interface Route
      */
-    public function addRoute($name, Zend_Controller_Router_Route_Interface $route) {
+    public function addRoute($name, Zend_Controller_Router_Route_Interface $route) 
+    {
+        if (method_exists($route, 'setRequest')) {
+            $route->setRequest($this->getFrontController()->getRequest());
+        }
+        
         $this->_routes[$name] = $route;
+        
         return $this;
     }
 
@@ -290,4 +298,33 @@ class Zend_Controller_Router_Rewrite extends Zend_Controller_Router_Abstract
         }
     }
 
+    /**
+     * Generates a URL path that can be used in URL creation, redirection, etc.
+     * 
+     * @param  array $userParams Options passed by a user used to override parameters
+     * @param  mixed $name The name of a Route to use
+     * @param  bool $reset Whether to reset to the route defaults ignoring URL params
+     * @param  bool $encode Tells to encode URL parts on output
+     * @throws Zend_Controller_Router_Exception
+     * @return string Resulting absolute URL path
+     */ 
+    public function assemble($userParams, $name = null, $reset = false, $encode = true)
+    {
+        if ($name == null) {
+            try {
+                $name = $this->getCurrentRouteName();
+            } catch (Zend_Controller_Router_Exception $e) {
+                $name = 'default';
+            }
+        }
+        
+        $route = $this->getRoute($name);
+        $url   = $route->assemble($userParams, $reset, $encode);
+
+        if (!preg_match('|^[a-z]+://|', $url)) {
+            $url = rtrim($this->getFrontController()->getBaseUrl(), '/') . '/' . $url;
+        }
+
+        return $url;
+    }
 }

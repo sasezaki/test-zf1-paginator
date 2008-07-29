@@ -216,6 +216,16 @@ class Zend_Http_Client
     protected $redirectCounter = 0;
 
     /**
+     * Fileinfo magic database resource
+     * 
+     * This varaiable is populated the first time _detectFileMimeType is called
+     * and is then reused on every call to this method
+     *
+     * @var resource
+     */
+    static protected $_fileInfoDb = null;
+    
+    /**
      * Contructor method. Will create a new HTTP client. Accepts the target
      * URL and optionally configuration array.
      *
@@ -306,7 +316,8 @@ class Zend_Http_Client
      */
     public function setMethod($method = self::GET)
     {
-        if (! preg_match('/^[A-Za-z_]+$/', $method)) {
+        $regex = '/^[^\x00-\x1f\x7f-\xff\(\)<>@,;:\\\\"\/\[\]\?={}\s]+$/';
+        if (! preg_match($regex, $method)) {
             /** @see Zend_Http_Client_Exception */
             require_once 'Zend/Http/Client/Exception.php';
             throw new Zend_Http_Client_Exception("'{$method}' is not a valid HTTP request method.");
@@ -648,13 +659,12 @@ class Zend_Http_Client
                 throw new Zend_Http_Client_Exception("Unable to read file '{$filename}' for upload");
             }
 
-            if (! $ctype && function_exists('mime_content_type')) $ctype = mime_content_type($filename);
+            if (! $ctype) $ctype = $this->_detectFileMimeType($filename);
         }
 
         // Force enctype to multipart/form-data
         $this->setEncType(self::ENC_FORMDATA);
 
-        if ($ctype === null) $ctype = 'application/octet-stream';
         $this->files[$formname] = array(basename($filename), $ctype, $data);
 
         return $this;
@@ -809,8 +819,8 @@ class Zend_Http_Client
                 $uri->setQuery($query);
             }
 
-            $body = $this->prepareBody();
-            $headers = $this->prepareHeaders();
+            $body = $this->_prepareBody();
+            $headers = $this->_prepareHeaders();
 
             // Open the connection, send the request and read the response
             $this->adapter->connect($uri->getHost(), $uri->getPort(),
@@ -889,7 +899,7 @@ class Zend_Http_Client
      *
      * @return array
      */
-    protected function prepareHeaders()
+    protected function _prepareHeaders()
     {
         $headers = array();
 
@@ -927,7 +937,7 @@ class Zend_Http_Client
 
             $headers[] = "Content-type: {$this->enctype}";
         }
-
+        
         // Set the user agent header
         if (! isset($this->headers['user-agent']) && isset($this->config['useragent'])) {
             $headers[] = "User-agent: {$this->config['useragent']}";
@@ -965,7 +975,7 @@ class Zend_Http_Client
      * @return string
      * @throws Zend_Http_Client_Exception
      */
-    protected function prepareBody()
+    protected function _prepareBody()
     {
         // According to RFC2616, a TRACE request should not have a body.
         if ($this->method == self::TRACE) {
@@ -1020,8 +1030,12 @@ class Zend_Http_Client
                     break;
             }
         }
+        
+        // Set the content-length if we have a body or if request is POST/PUT
+        if ($body || $this->method == self::POST || $this->method == self::PUT) {
+            $this->setHeaders('Content-length', strlen($body));
+        }
 
-        if ($body) $this->setHeaders('Content-length', strlen($body));
         return $body;
     }
 
@@ -1059,6 +1073,46 @@ class Zend_Http_Client
         }
 
         return $parameters;
+    }
+    
+    /**
+     * Attempt to detect the MIME type of a file using available extensions
+     * 
+     * This method will try to detect the MIME type of a file. If the fileinfo
+     * extension is available, it will be used. If not, the mime_magic 
+     * extension which is deprected but is still available in many PHP setups
+     * will be tried. 
+     * 
+     * If neither extension is available, the default application/octet-stream
+     * MIME type will be returned
+     *
+     * @param  string $file File path
+     * @return string       MIME type
+     */
+    protected function _detectFileMimeType($file)
+    {
+        $type = null;
+        
+        // First try with fileinfo functions
+        if (function_exists('finfo_open')) {
+            if (self::$_fileInfoDb === null) {
+                self::$_fileInfoDb = @finfo_open(FILEINFO_MIME);
+            }
+            
+            if (self::$_fileInfoDb) { 
+                $type = finfo_file(self::$_fileInfoDb, $file);
+            }
+            
+        } elseif (function_exists('mime_content_type')) {
+            $type = mime_content_type($file);
+        }
+        
+        // Fallback to the default application/octet-stream
+        if (! $type) {
+            $type = 'application/octet-stream';
+        }
+        
+        return $type;
     }
 
     /**
